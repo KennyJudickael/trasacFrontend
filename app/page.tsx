@@ -4,13 +4,14 @@ import {
   Activity,
   ArrowDownCircle,
   ArrowUpCircle,
+  Pencil,
   PlusCircle,
   Trash,
   TrendingDown,
   TrendingUp,
   Wallet
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from './api'
 
@@ -22,19 +23,58 @@ type Transaction = {
 }
 
 export default function Home() {
+  const hasFetchedOnce = useRef(false)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [text, setText] = useState<string>('')
   const [amount, setAmount] = useState<number | ''>('')
   const [loading, setLoading] = useState(false)
+  const [editingTransaction, setEditingTransaction] =
+    useState<Transaction | null>(null)
+
+  const openEditModal = (transaction: Transaction) => {
+    setEditingTransaction(transaction)
+    const modal = document.getElementById('edit_modal') as HTMLDialogElement
+    if (modal) modal.showModal()
+  }
 
   const getTransactions = async () => {
     try {
       const res = await api.get<Transaction[]>('transactions/')
       setTransactions(res.data)
-      toast.success('Transactions fetched successfully')
+
+      // ✅ Affiche le toast uniquement au premier chargement
+      if (!hasFetchedOnce.current) {
+        toast.success('Transactions fetched successfully')
+        hasFetchedOnce.current = true
+      }
     } catch (error) {
       console.error('Error fetching transactions:', error)
       toast.error('Failed to fetch transactions')
+    }
+  }
+
+  const updateTransaction = async () => {
+    if (!editingTransaction?.text || isNaN(Number(editingTransaction.amount))) {
+      toast.error('Please fill all fields correctly')
+      return
+    }
+
+    setLoading(true)
+    try {
+      await api.put(`transactions/${editingTransaction.id}/`, {
+        text: editingTransaction.text,
+        amount: editingTransaction.amount
+      })
+      toast.success('Transaction updated successfully')
+      getTransactions()
+      const modal = document.getElementById('edit_modal') as HTMLDialogElement
+      if (modal) modal.close()
+      setEditingTransaction(null)
+    } catch (error) {
+      console.error('Error updating transaction:', error)
+      toast.error('Failed to update transaction')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -50,28 +90,37 @@ export default function Home() {
   }
 
   const addTransaction = async () => {
-    if (!text || amount == '' || isNaN(Number(amount))) {
+    if (!text || amount === '' || isNaN(Number(amount))) {
       toast.error('Please fill the following fields')
+      return
     }
+
+    const modal = document.getElementById('my_modal_3') as HTMLDialogElement
+    const amountNumber = Number(amount)
+
+    // ❗ Si c'est une dépense négative et qu'elle dépasse le solde
+    if (amountNumber < 0 && Math.abs(amountNumber) > balance) {
+      if (modal) modal.close()
+      toast.error('La dépense dépasse le solde disponible')
+      return
+    }
+
     setLoading(true)
     try {
-      const res = await api.post<Transaction>(`transactions/`, {
+      await api.post<Transaction>('transactions/', {
         text,
-        amount: Number(amount)
+        amount: amountNumber
       })
-      getTransactions() // Refresh the list after deletion
-      const modal = document.getElementById('my_modal_3') as HTMLDialogElement
-      if (modal) {
-        modal.close()
-      }
-      toast.success('Transactions added successfully')
+      await getTransactions() // Refresh list
+      if (modal) modal.close()
+      toast.success('Transaction ajoutée avec succès')
       setAmount('')
       setText('')
     } catch (error) {
-      console.error('Error fetching transactions:', error)
-      toast.error('Failed to add the transaction')
+      console.error('Erreur lors de l’ajout :', error)
+      toast.error('Échec de l’ajout de la transaction')
     } finally {
-      setLoading(true)
+      setLoading(false)
     }
   }
 
@@ -197,7 +246,14 @@ export default function Home() {
                   {t.amount > 0 ? `+ ${t.amount}` : `${t.amount}`}
                 </td>
                 <td>{formatDate(t.created_at)}</td>
-                <td>
+                <td className="flex gap-2">
+                  <button
+                    onClick={() => openEditModal(t)}
+                    className="btn btn-sm btn-info btn-soft"
+                    title="Edit transaction"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={() => deleteTransaction(t.id)}
                     className="btn btn-sm btn-error btn-soft"
@@ -256,6 +312,59 @@ export default function Home() {
               Add
             </button>
           </div>
+        </div>
+      </dialog>
+
+      <dialog id="edit_modal" className="modal backdrop-blur">
+        <div className="modal-box border-2 border-info/10 border-dashed">
+          <form method="dialog">
+            <button className="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">
+              ✕
+            </button>
+          </form>
+          <h3 className="font-bold text-lg">Edit transaction</h3>
+          {editingTransaction && (
+            <div className="flex flex-col gap-4 mt-4">
+              <div className="flex flex-col gap-2">
+                <label className="label">Text</label>
+                <input
+                  type="text"
+                  value={editingTransaction.text}
+                  onChange={(e) =>
+                    setEditingTransaction({
+                      ...editingTransaction,
+                      text: e.target.value
+                    })
+                  }
+                  className="input w-full"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="label">Amount</label>
+                <input
+                  type="number"
+                  value={editingTransaction.amount}
+                  onChange={(e) =>
+                    setEditingTransaction({
+                      ...editingTransaction,
+                      amount: Number(e.target.value)
+                    })
+                  }
+                  className="input w-full"
+                />
+              </div>
+
+              <button
+                className="w-full btn btn-info mt-3"
+                onClick={updateTransaction}
+                disabled={loading}
+              >
+                <Pencil className="w-4 h-4" />
+                Update
+              </button>
+            </div>
+          )}
         </div>
       </dialog>
     </div>
